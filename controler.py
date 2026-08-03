@@ -5,10 +5,8 @@ import torch
 import torch.nn as nn
 from losses import *
 # from metric import base1_metric, label2list, pair_metric_ps
-from apex import amp
 import torch
 from collections import OrderedDict
-from future.utils import iteritems
 from utils import *
 from metircs import *
 from config import *
@@ -18,7 +16,7 @@ import time
 
 def convert_weights(state_dict):
     tmp_weights = OrderedDict()
-    for name, params in iteritems(state_dict):
+    for name, params in state_dict.items():
         tmp_weights[name.replace('module.', '')] = params
     return tmp_weights
 
@@ -138,7 +136,8 @@ class Controler(Model):
             for key in schedulers.keys():
                 schedulers[key].step()
 
-            score = self.test(models, epoch, cycle, method, dataloaders)
+            score = self.test(models, epoch, cycle, method, dataloaders,
+                              data_split='validation')
             _ = self.models_save(models, score, best_score)
             if best_score >= score:
                 total_patience_cnt += 1
@@ -211,7 +210,8 @@ class Controler(Model):
                 print('in second')
                 for key in dual_key_list:
                     schedulers[key].step()
-                score = self.test(models, epoch, cycle, method, dataloaders, test_dual=True)
+                score = self.test(models, epoch, cycle, method, dataloaders,
+                                  test_dual=True, data_split='validation')
                 _ = self.models_save(models, score, best_score2, keys_list=dual_key_list)
                 if best_score2 >= score:
                     total_patience_cnt += 1
@@ -226,7 +226,8 @@ class Controler(Model):
                 print('not in second')
                 for key in schedulers.keys():
                     schedulers[key].step()
-                score = self.test(models, epoch, cycle, method, dataloaders)
+                score = self.test(models, epoch, cycle, method, dataloaders,
+                                  data_split='validation')
                 _ = self.models_save(models, score, best_score)
                 if best_score >= score:
                     total_patience_cnt += 1
@@ -242,14 +243,16 @@ class Controler(Model):
                     total_patience_cnt = 0
         self.models_load(models)
 
-    def test(self, models, epoch, cycle, method, dataloaders, log_file=None, other_file=None, test_dual=False, final_test=False):
+    def test(self, models, epoch, cycle, method, dataloaders, log_file=None,
+             other_file=None, test_dual=False, final_test=False,
+             data_split='test'):
         outputs_clf = [[], [], [], [], []]
         outputs_dis = [[], [], [], [], []]
         outputs_dual = [[], [], [], [], []]
         outputs_z = [[], [], [], [], []]
         self.models_set_eval(models)
         with torch.no_grad():
-            for data in tqdm(dataloaders['test']):
+            for data in tqdm(dataloaders[data_split]):
                 input_ids, input_type_ids, input_mask = [x.to(self.device) for x in data[0]]
                 labels = data[1].to(self.device)
                 out = [input_ids, input_type_ids, input_mask, None]
