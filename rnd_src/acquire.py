@@ -158,7 +158,7 @@ def acquire(args, models, dataset, val_dataset, pool, labeled, device, log=print
         # system: the head applied to Z must reproduce the logits it emitted.
         Wl = torch.cat([model.clf.weight.double().cpu(),
                         model.clf.bias.double().cpu().unsqueeze(-1)], dim=-1)
-        mism = float((Zl @ Wl.T - Ll).abs().max())
+        mism = float((Zl @ Wl.T - Ll).detach().abs().max())
         log('[rnd] coords: raw CLS, max|Z W^T - logits| = %.3e' % mism)
         if mism > 1e-6:
             log('[rnd] WARNING features and logits disagree -- (p-y)z is not the '
