@@ -8,7 +8,7 @@ import time
 import torch
 torch.set_default_dtype(torch.float64)
 torch.manual_seed(0)
-from rnd.scoring import ResidualNeed, augment, reference_gradient, select
+from rnd_src.scoring import ResidualNeed, augment, reference_gradient, select
 
 C, d, NL, NU, B = 54, 768, 200, 20000, 100
 Zl = augment(torch.randn(NL, d) * 0.3)

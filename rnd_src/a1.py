@@ -19,8 +19,8 @@ from scipy.stats import spearmanr
 
 import torch.nn.functional as F
 
-from rnd.head import fit, probs, fisher_damping
-from rnd.scoring import ResidualNeed, augment, reference_gradient
+from rnd_src.head import fit, probs, fisher_damping
+from rnd_src.scoring import ResidualNeed, augment, reference_gradient
 
 torch.set_default_dtype(torch.float64)
 torch.set_num_threads(os.cpu_count())
@@ -143,7 +143,7 @@ CFG_KEYS = ('n_lab', 'n_cand', 'n_ref', 'n_eval', 'wd', 'kappa',
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--cache', default='./rnd/cache/train_6000.pt')
+    ap.add_argument('--cache', default='./rnd_src/cache/train_6000.pt')
     ap.add_argument('--trials', type=int, default=5)
     ap.add_argument('--n_lab', type=int, default=20)
     ap.add_argument('--n_cand', type=int, default=100)
@@ -153,7 +153,7 @@ def main():
     ap.add_argument('--kappa', type=float, default=0.0)
     ap.add_argument('--fit_iters', type=int, default=400)
     ap.add_argument('--retrain_iters', type=int, default=400)
-    ap.add_argument('--out', default='./rnd/a1_results.json')
+    ap.add_argument('--out', default='./rnd_src/a1_results.json')
     args = ap.parse_args()
     cfg = {k: getattr(args, k) for k in CFG_KEYS}
 

@@ -5,7 +5,7 @@
 # 模型权重 / 训练缓存
 model_saved/
 bert/bert-base-uncased/pytorch_model.bin
-rnd/cache/
+rnd_src/cache/
 *.pt
 
 # Python 缓存

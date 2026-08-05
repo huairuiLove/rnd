@@ -34,25 +34,29 @@ Cluster-MAB 补多样性。本文档的解法不是二选一，而是构造一�
    influence 二阶矩（命题 3），两条路线恒等；
 3. 批内去冗余由目标函数自带的 deflation 给出（式 9），不需要 MAB；
 4. prototype 在标签轴细、实例轴粗，故式 (13) 的表达力不低于它；"$M_c$ 就是截断秩"是解释性猜想而非恒等（第 8 节已按证明强度分级）；
-5. 完整核可**精确因式分解**，复杂度由 $O(Cd)$ 降到 $O(C+d)$（命题 4）。
+5. 完整核可**精确因式分解**，单对候选的核评估只需 $O(C+d)$（命题 4）；完整选择仍由筛选、求解和
+   deflation 的复杂度决定。
 
 净结果：删除 $S_{\mathrm{boundary}}$、$S_{\mathrm{prototype}}$、PFD、SLCI、多原型库、$\tau_{t,c}$、
-rank 融合、$\lambda_t$、Cluster-UCB 及其超参 $\{\lambda_{\min},\lambda_{\max},\gamma,\alpha,k_H,M,\eta,M_c\}$，
+rank 融合、$\lambda_t$、Cluster-UCB 及其探索/聚类超参 $\{\lambda_{\min},\lambda_{\max},\gamma,\alpha,k_H,\eta,M_c\}$；
+保留一个用于可容许上界筛选的工作集大小 $M$，
 保留一个核、一条选择式、一条更新式，并在其上叠加一个可学习策略。
 
 ## 2. 设定与符号
 
-本文档的全部闭式结论依赖一个结构前提：**可训练部分是冻结特征之上的单个 Linear 头**。
+本文档的闭式结论针对每轮查询时的**分类头局部子空间**：当前 encoder 先固定，分类头是直接作用于当前
+CLS 表示的单个 Linear 头。CoMAL 可以继续部分解冻 encoder；此时下文的 Fisher 是 head-local 几何，
+精确描述分类头方向的局部更新，但忽略 encoder 漂移及 head--encoder 交叉块对端到端重训的影响。
 
-CoMAL 满足这一前提：`networks.py:16` 的 `BackBone_No_GCN_No_Atten.clf = nn.Linear(hidden_size, label_num)`
-直接作用于 BERT 的 CLS 输出，`Encoder_No_GCN_No_Atten.encoder_init()` 在 `--freeze_bert` 下冻结前
-`freeze_layer_num` 层（`scripts/aapd/main_our.sh` 已默认使用）。**若解冻整个 backbone，第 5--8 节的闭式
-结论不再成立**，此时须退回 K-FAC 近似；那不是本适配的目标场景。
+CoMAL 满足分类头这一局部结构：`networks.py:16` 的 `BackBone_No_GCN_No_Atten.clf = nn.Linear(hidden_size, label_num)`
+直接作用于 BERT 的 CLS 输出，`Encoder_No_GCN_No_Atten.encoder_init()` 按 `freeze_layer_num` 控制部分解冻。
+若研究的是整个 backbone 参数的后验，本文闭式不再是完整目标；本文明确把它作为当前 encoder 快照上的
+head-local 近似，不把式 (5)--(8) 宣称为端到端参数空间的精确结论。
 
 一处必要修正：$h(x)$ 必须增广为 $z(x)=[h(x),1]$，否则 `nn.Linear` 的 bias 不进入 Fisher 几何，
 式 (1) 的秩一梯度恒等式会漏掉 bias 分量。下文的 $h$ 在实现中一律指增广后的 $z$，$d\to d+1$。
 
-- 特征 $h(x)\in\mathbb R^{d}$，取 $\lVert h(x)\rVert_2=1$；
+- 特征 $h(x)\in\mathbb R^{d}$，使用 head 实际消费的坐标（默认是 raw CLS，不要求单位范数）；
 - 头部参数 $W\in\mathbb R^{C\times d}$，$\theta=\operatorname{vec}(W)\in\mathbb R^{Cd}$；
 - $p_c(x)=\sigma(\langle W_c,h(x)\rangle)$，$s_c(x)=\sqrt{p_c(x)(1-p_c(x))}$，$S(x)=\operatorname{diag}(s_c^2)$；
 - 参考集 $V$（只用于设计方向、超参与模型选择，test 全程封闭）；
@@ -68,15 +72,16 @@ g(x,y)=\operatorname{vec}(G)=\sum_{c=1}^{C}(p_c-y_c)\,\psi_c(x).
 \tag{1}
 $$
 
-**标签块基是正交归一的。** 定义 $\psi_c(x)=e_c\otimes h(x)\in\mathbb R^{Cd}$，则
+**标签块基是跨标签正交的。** 定义 $\psi_c(x)=e_c\otimes h(x)\in\mathbb R^{Cd}$，则
 
 $$
 \langle\psi_c,\psi_{c'}\rangle=(e_c^\top e_{c'})\lVert h\rVert_2^2=\delta_{cc'}.
 \tag{2}
 $$
 
-式 (2) 是后续所有闭式成立的原因：$\Psi(x)=[\psi_1,\ldots,\psi_C]\in\mathbb R^{Cd\times C}$ 是一组
-正交归一列，$\Psi^\top\Psi=I_C$。**梯度表示天然按标签分块**，因此不需要另建 label-wise latent 分支。
+式 (2) 表明不同标签块始终正交；若 $h$ 未归一化，则 $\Psi^\top\Psi=\lVert h\rVert^2I_C$，而不是 $I_C$。
+后续分块 Fisher 结论只需要跨标签正交，不需要单位范数。**梯度表示天然按标签分块**，因此不需要另建
+label-wise latent 分支。
 
 **Fisher 是标签块上的对角二次型。** 设给定 $x$ 时标签条件独立（交叉项见第 6 节），
 
@@ -249,7 +254,7 @@ $\widehat\Sigma_{cc'}hh^\top$，于是：
 | K-FAC / rank-$r$ | 不需要 | 需要 |
 | 标签相关性 | 仅经 $H^{-1}$ 与 $R$ 行间几何间接体现 | 显式建模 |
 
-`rnd/scoring.py` 的模块 docstring 记录了该互斥关系。引入 $\widehat\Sigma$ 属未实现扩展，
+`rnd_src/scoring.py` 的模块 docstring 记录了该互斥关系。引入 $\widehat\Sigma$ 属未实现扩展，
 **不得在同一处同时宣称"建模了标签相关性"与"精确分块对角"。**
 
 ## 7. deflation：批内去冗余的正确形式
@@ -316,7 +321,8 @@ $$
 *证明.* 由式 (2)，$\langle\psi_c(x),\psi_{c'}(x')\rangle=\delta_{cc'}\langle h(x),h(x')\rangle$，
 代入双线性展开即得。$\square$
 
-**推论 4.1（复杂度）.** 式 (13) 只需缓存 $d$ 维语义向量与 $C$ 维标签 profile，代价 $O(C+d)$，
+**推论 4.1（核评估复杂度）.** 式 (13) 只需缓存 $d$ 维语义向量与 $C$ 维标签 profile，单对候选
+评估代价为 $O(C+d)$，
 而 IPB-MAB §5.3 显式物化的 $\phi_t(x)\in\mathbb R^{Cd}$ 为 $O(Cd)$。原文档"用随机投影或按标签分块
 控制维度"的补丁可以删除。
 
@@ -386,7 +392,7 @@ $$
 \tag{14'}
 $$
 
-数值验证：$A$ 的跨标签块最大元素为 $0.0$（`rnd/_check_blockdiag.py`），
+数值验证：$A$ 的跨标签块最大元素为 $0.0$（`rnd_src/_check_blockdiag.py`），
 非“接近零”而是构造上恒为零。
 
 **由此删除两处结构：**（i）K-FAC 近似；（ii）rank-$r$ 截断与原式 (14) 的因子形式维护。
@@ -446,7 +452,7 @@ $$
   相对 $g_V$ 不成立；
 - $\kappa=0$ 是唯一与式 (7) 严格等同的配置，消融必须含它作为"纯 c-最优"基准；
 - 日志打印 $\lVert\mathrm{GV_{eff}}-g_V\rVert/\lVert g_V\rVert$ 与是否发生 flooring，
-  使读者可判断目标偏离幅度（`rnd/acquire.py` 的 `objective:` 行）。
+  使读者可判断目标偏离幅度（`rnd_src/acquire.py` 的 `objective:` 行）。
 
 ### 9.3 停止规则
 
@@ -488,16 +494,17 @@ $$
 
 式 (16) 仍是上界，故 top-$M$ 截断**可采纳**（被丢弃者的精算值也必低于截断线），
 且比式 (9) 紧得多。数值验证 $\Delta^{\mathrm{lin}}\ge\Delta^{\mathrm{ub}}\ge\Delta$ 逐点成立
-（`rnd/_check_cost.py`）。
+（`rnd_src/_check_cost.py`）。
 
 **关于"精确"的准确表述.** 贪心每步对**整个工作集 $S$** 精确计算式 (14')（缓存 $m$ 使其为 $O(MCd)$），
 因此 argmax 在 $S$ 内是精确的、无 shortlist、不丢弃任何候选。唯一的近似是构造 $S$ 的那次上界筛选；
 日志打印**筛选证书**（被丢弃者的最大上界 vs 保留者的最大精算值），据此判断首个选择是否可证明为
-全池 argmax。$M$ 的截断量必须打印——否则覆盖率看起来会像是全池的。
+全池 argmax。由于后续 deflation 可能改变工作集外候选的相对排序，固定 $S$ 的后续 batch 选择仍是
+工作集近似；若要声明整批全池精确，需要每步重新筛选或给出动态池级证书。$M$ 的截断量必须打印。
 
 **秩一累积误差是实测量，不是假设.** SM 更新与缓存 $m$ 都会累积浮点误差。批末重算若干候选的 $m$
 与缓存值比对，实测 $B=100$ 后漂移 $4.2\times10^{-14}$；预测/实际 $\Delta$ 相对误差 $6.4\times10^{-13}$；
-SM 与从头重分解的差 $4.7\times10^{-16}$（`rnd/_check_deflate.py`）。三者都进日志。
+SM 与从头重分解的差 $4.7\times10^{-16}$（`rnd_src/_check_deflate.py`）。三者都进日志。
 
 ## 10. 智能体层：把解析式降级为先验
 
@@ -561,7 +568,8 @@ $\Phi_0-\Phi(Q)$ 打分（**无需重训模型**）取最优批次提交专家�
 搜索，成本可控。
 
 **超参数对比.** IPB-MAB 需调 $\{K_c,M,k_H,\alpha,\lambda_{\min},\lambda_{\max},\gamma,\eta,M_c,\delta,\tau_{t,c}\}$（11+）；
-本方法需调 $\{r,\delta,\kappa\}$ 与标准 RL 超参 $\{\tau,G,\text{KL 系数}\}$。
+本方法解析路径需调 $\{M,\delta,\kappa\}$，其中 $M$ 是上界筛选工作集大小，另加标准 RL 超参
+$\{\tau,G,\text{KL 系数}\}$（若启用策略层）。
 
 ## 11. 理论边界（不可越界宣称）
 
@@ -619,10 +627,10 @@ $\Phi_0-\Phi(Q)$ 打分（**无需重训模型**）取最优批次提交专家�
 3. **复杂度（第 6--8 步）.** 三个独立的坑：(i) 全池精算式 (14')；(ii) 每步重做 Cholesky；
    (iii) 每步重算 m。本项目初版三者皆犯，实测 C=54, d=769, B=100, |U|=2e4 下耗时 564s；
    改为上界筛选 + Sherman-Morrison + 缓存 m 后为 11.8s（约 48 倍），
-   预测/实际误差 6.4e-13、m 漂移 4.2e-14、Phi 仍严格单调。见 `rnd/_check_cost.py`。
+   预测/实际误差 6.4e-13、m 漂移 4.2e-14、Phi 仍严格单调。见 `rnd_src/_check_cost.py`。
 
 **关于 delta 的定位（本版更正）.** 初稿在第 3 步标注"与拟合头的 L2 项一致，非手调"，
-**该表述已撤回**。它仅在用 `rnd/head.py` 的 L2 目标拟合代理头时成立；接入 CoMAL 实时模型后，
+**该表述已撤回**。它仅在用 `rnd_src/head.py` 的 L2 目标拟合代理头时成立；接入 CoMAL 实时模型后，
 优化器是 AdamW，没有可对齐的 L2 项，因此 delta 是一个**普通超参**，须进入消融、
 不得宣称"由拟合目标严格导出"。
 ```
@@ -648,7 +656,7 @@ $\Phi_0-\Phi(Q)$ 打分（**无需重训模型**）取最优批次提交专家�
   $M_b$ 确有贡献；（iii）**真值的选择本身是 A1 成败的一部分**：若改用 n_lab=200 + macro-AUPRC
   作真值，同一打分器只读出 +0.08（random +0.04），看似失败——实为噪声主导，eval 集 AP 的
   bootstrap 噪声底约为候选间信号的 5 倍。参考集损失下降既是 $\Phi$ 实际建模的量，
-  信噪比也高约 3 倍。复现：`python -m rnd.a1`。
+  信噪比也高约 3 倍。复现：`python -m rnd_src.a1`。
 - **A2（deflation 替代 MAB）**：式 (11) 的批内去冗余在批内平均相似度、覆盖簇数、相同预算性能上
   应不劣于 Cluster-UCB。
 - **A3（残差需求替代原型外扩）**：新增稀有标签正例数、新表型覆盖应不劣于 PFD/SLCI；
@@ -688,11 +696,11 @@ $\Phi_0-\Phi(Q)$ 打分（**无需重训模型**）取最优批次提交专家�
 
 | 文件 | 职责 |
 |---|---|
-| `rnd/features.py` | 冻结 BERT CLS 特征提取与缓存；`z=[h,1]` 增广在 `scoring.augment` |
-| `rnd/head.py` | 凸线性头（LBFGS）+ `fisher_damping()` 给出 delta = 2*wd*N/d |
-| `rnd/scoring.py` | `ResidualNeed`：式 (14) 分块 $A_c$、式 (14') 精算、式 (11) deflation、式 (15) flooring |
-| `rnd/a1.py` | A1 离线回放验证 |
-| `rnd/_check_*.py` | 秩一梯度、分块对角、deflation 精确性、Hessian/damping 一致性的数值自检 |
+| `rnd_src/features.py` | CLS 特征提取与缓存；`z=[h,1]` 增广在 `scoring.augment` |
+| `rnd_src/head.py` | 凸线性头（LBFGS）+ `fisher_damping()` 给出代理头阻尼约定 |
+| `rnd_src/scoring.py` | `ResidualNeed`：式 (14) 分块 $A_c$、式 (14') 精算、式 (11) deflation、式 (15) flooring |
+| `rnd_src/a1.py` | A1 离线回放验证 |
+| `rnd_src/_check_*.py` | 秩一梯度、分块对角、deflation 精确性、Hessian/damping 一致性的数值自检 |
 
 CoMAL 侧改动点：
 
@@ -722,7 +730,7 @@ CoMAL 侧改动点：
 
 不可把 influence、Fisher 设计、聚类、原型、RL 任一单点作为创新点。可声明的表述为：
 
-> 在冻结特征 + 线性分类头这一设定下，把多标签主动学习的 influence 打分与样本相似度放到同一个
+> 在当前 encoder 快照上的线性分类头局部子空间中，把多标签主动学习的 influence 打分与样本相似度放到同一个
 > Fisher 几何中统一表述：由 score-function identity，未标注候选上的**带符号**线性 influence
 > 在模型分布下期望为零，因此其**均值**不能作排序信号——这不否定 $|I|$、$\mathrm{Var}(I)$、
 > 正向效用或伪标签梯度等其他用法；据此本文改用标签边缘化后的 influence 二阶矩，并证明该二次型
@@ -730,7 +738,8 @@ CoMAL 侧改动点：
 > 边际增益式 (14') 与可容许上界式 (16)。由此**批内去冗余**不再是外加启发式，而是目标函数自带的
 > 逐标签 deflation（式 (11)）；**探索-利用调度**与**原型外扩**同残差秩收缩、低秩投影补之间的
 > 对应关系目前是**解释性假设**，留待第 14 节消融检验，不作为已证归约声明。核的精确因式分解把
-> 打分复杂度从 $O(Cd)$ 降到 $O(C+d)$；配合 Sherman–Morrison 与缓存饱和项的秩一更新，在真实
+> 单对候选的核评估从 $O(Cd)$ 降到 $O(C+d)$；完整选择再配合上界筛选、Sherman–Morrison 与缓存饱和项的
+> 秩一更新，在真实
 > CoMAL 规模（$C{=}54$、$d{=}768$、$|U|{=}2\times10^4$、$B{=}100$）下贪心选择由 564s 降到
 > 11.8s。稀有标签下界（式 (15)）给出的是一个**稀有标签稳健化目标**（$\kappa>0$ 时
 > $G_V^{\mathrm{eff}}\neq g_V$），而非原 c-最优目标的精确实现。第 10 节的策略层（行为克隆先验

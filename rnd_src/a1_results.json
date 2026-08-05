@@ -1,6 +1,6 @@
 {
   "args": {
-    "cache": "./rnd/cache/train_6000.pt",
+    "cache": "./rnd_src/cache/train_6000.pt",
     "trials": 8,
     "n_lab": 200,
     "n_cand": 150,
@@ -10,7 +10,7 @@
     "kappa": 0.0,
     "fit_iters": 400,
     "retrain_iters": 100,
-    "out": "./rnd/a1_results.json"
+    "out": "./rnd_src/a1_results.json"
   },
   "summary": {
     "rnd_exact": {

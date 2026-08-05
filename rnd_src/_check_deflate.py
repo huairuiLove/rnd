@@ -6,7 +6,7 @@ since the fast path no longer recomputes a Cholesky per pick.
 import torch
 torch.set_default_dtype(torch.float64)
 torch.manual_seed(0)
-from rnd.scoring import ResidualNeed, augment, reference_gradient, sigma2
+from rnd_src.scoring import ResidualNeed, augment, reference_gradient, sigma2
 
 N, C, d = 40, 6, 12
 H = torch.nn.functional.normalize(torch.randn(N, d), dim=-1)

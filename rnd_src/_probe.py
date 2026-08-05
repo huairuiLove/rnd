@@ -2,12 +2,12 @@ import os, torch
 torch.set_default_dtype(torch.float64)
 torch.set_num_threads(os.cpu_count())
 import torch.nn.functional as F
-from rnd.head import fit, probs, fisher_damping
-from rnd.scoring import augment, ResidualNeed, reference_gradient
-from rnd.a1 import split_indices
+from rnd_src.head import fit, probs, fisher_damping
+from rnd_src.scoring import augment, ResidualNeed, reference_gradient
+from rnd_src.a1 import split_indices
 from scipy.stats import spearmanr
 
-b=torch.load('rnd/cache/train_6000.pt'); H,Y=b['H'],b['Y']
+b=torch.load('rnd_src/cache/train_6000.pt'); H,Y=b['H'],b['Y']
 Z=augment(H)
 
 def trial(seed, n_lab=20, n_cand=100, n_ref=4000, wd=1e-4):

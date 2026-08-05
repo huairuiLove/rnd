@@ -1,6 +1,6 @@
 """RND acquisition against a live CoMAL model.
 
-Maps section 12 of the design doc onto CoMAL's AL loop. Unlike rnd/a1.py, which fits
+Maps section 12 of the design doc onto CoMAL's AL loop. Unlike rnd_src/a1.py, which fits
 its own proxy head, this reads the trained backbone's own features and head: the Fisher
 geometry has to describe the posterior the AL loop actually holds, not a surrogate.
 
@@ -20,13 +20,13 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from samplers import SubsetSequentialSampler
-from rnd.scoring import (ResidualNeed, augment, fisher_scale,
-                         reference_gradient, select)
+from rnd_src.scoring import (ResidualNeed, augment, fisher_scale,
+                             reference_gradient, select)
 
 
 @torch.no_grad()
 def embed(model, dataset, indices, device, batch_size=32, num_workers=0):
-    """Frozen-backbone CLS features, logits and ground-truth labels for `indices`.
+    """Current-encoder CLS features, logits and ground-truth labels for `indices`.
 
     Features are returned in the head's own coordinates (raw CLS, un-normalised) so
     that logits == clf(cls) holds exactly and (p - y) z is the true head gradient.
@@ -52,7 +52,7 @@ def refit_head(Zl, Yl, wd, iters=200):
     in the new coordinates or the gradient identity breaks. Returns W (C, D) for
     augmented Z, so logits are Z @ W.T.
     """
-    from rnd.head import fit
+    from rnd_src.head import fit
     return fit(Zl, Yl, wd=wd, iters=iters)
 
 
@@ -167,7 +167,7 @@ def acquire(args, models, dataset, val_dataset, pool, labeled, device, log=print
     GV = reference_gradient(Zr, Pr, Yr)
     # delta is a regularisation choice, not a derived quantity. CoMAL trains its head
     # with AdamW, which has no L2 term to match, so the 2*wd*|L|/d form is only a
-    # convention inherited from the proxy head in rnd/head.py. What it actually does is
+    # convention inherited from the proxy head in rnd_src/head.py. What it actually does is
     # set the scale of the null space: with |L| << d the blocks are rank-deficient and
     # delta decides how much a direction unseen in L still counts. Expressed relative
     # to the Fisher's own scale so the same number transfers across backbones.

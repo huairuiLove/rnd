@@ -1,8 +1,8 @@
 import torch, time
 torch.set_default_dtype(torch.float64)
 torch.manual_seed(0)
-from rnd.head import fit, bce
-from rnd.scoring import augment
+from rnd_src.head import fit, bce
+from rnd_src.scoring import augment
 
 N, C, d = 300, 10, 64
 Z = augment(torch.nn.functional.normalize(torch.randn(N, d), dim=-1))

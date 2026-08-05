@@ -1,6 +1,7 @@
 """Residual-need scoring for a single sigmoid classification head.
 
-For a linear head on frozen features, the per-sample BCE gradient is rank one and
+For the current encoder snapshot, the per-sample BCE gradient with respect to the
+linear head is rank one and
 the conditional-independence Fisher is block diagonal across labels. Both facts are
 checked in _check_blockdiag.py. Consequences used throughout this module:
 
@@ -19,9 +20,8 @@ Two costs drive the implementation:
 
   * exact scoring needs m_c, i.e. a (D,D) solve per label per candidate, O(N C D^2).
     Eq. (9) needs one (N,D)x(D,C) matmul, O(N C D). Since eq. (9) dominates eq. (8)
-    entrywise it is an admissible screen: exact-score a shortlist, and if the best
-    discarded upper bound is at or below the best exact value, that pick is provably
-    the argmax over the whole set. `select` computes this certificate every step.
+    entrywise it is an admissible screen. The pool-level implementation certifies the
+    first pick; later picks are exact only within the fixed work set.
   * deflation must not refactorize. A_c changes by a rank-one term, so A_c^{-1} is
     maintained by Sherman-Morrison in O(C D^2) rather than O(C D^3) per pick. At
     C=54, D=769, B=100 that is ~3e9 flops instead of ~2.5e12.

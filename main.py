@@ -77,7 +77,8 @@ parser.add_argument('--save_sub_tensor', action='store_true')
 parser.add_argument('--rnd_ref_size', type=int, default=2000,
                     help='reference set V size, taken from the validation split')
 parser.add_argument('--rnd_wd', type=float, default=1e-4,
-                    help='head L2; also fixes the Fisher damping delta=2*wd*N/d')
+                    help='L2 used by the standalone proxy head; live CoMAL damping is '
+                         'controlled by --rnd_delta or --rnd_delta_rel')
 parser.add_argument('--rnd_kappa', type=float, default=0.0,
                     help='rare-label row-norm floor, eq. (15); 0 disables it')
 parser.add_argument('--rnd_delta', type=float, default=0.0,

@@ -4,11 +4,11 @@ import time
 
 import torch
 torch.set_num_threads(os.cpu_count())
-from rnd.features import load_split, load_label2id, extract
+from rnd_src.features import load_split, load_label2id, extract
 
 DATA = './data/aapd_54'
 BERT = './bert/bert-base-uncased'
-OUT = './rnd/cache'
+OUT = './rnd_src/cache'
 LIMITS = {'train': 6000, 'val': 2000}
 
 

@@ -8,7 +8,7 @@ exact score over the whole work set at every step and comparing.
 import torch
 torch.set_default_dtype(torch.float64)
 torch.manual_seed(0)
-from rnd.scoring import ResidualNeed, augment, reference_gradient
+from rnd_src.scoring import ResidualNeed, augment, reference_gradient
 
 C, d, NL, M, B = 54, 768, 200, 400, 30
 Zl = augment(torch.randn(NL, d) * 0.3)

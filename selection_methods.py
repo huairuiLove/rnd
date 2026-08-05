@@ -363,7 +363,7 @@ def query_samples_rnd(args, models, dataset, val_dataset, subset, device,
     Kept separate from query_samples/query_samples_other so the CoMAL prototype
     branch and the other baselines stay untouched and remain comparable.
     """
-    from rnd.acquire import acquire
+    from rnd_src.acquire import acquire
 
     for key in models.keys():
         models[key].eval()
@@ -426,7 +426,6 @@ def pred_part_stat(pred, thresold=0.0):
     part_1 = torch.where(pred >= thresold)[0]
     part_0 = torch.where(pred < thresold)[0]
     return part_0, part_1
-
 
 
 

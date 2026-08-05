@@ -1,8 +1,7 @@
-"""Extract and cache frozen-BERT CLS features for AAPD.
+"""Extract and cache BERT CLS features for AAPD.
 
-The RND derivation assumes the trainable part is a single linear head on fixed
-features, which matches CoMAL's --freeze_bert setting. We therefore cache h(x) once
-and do all active-learning arithmetic on top of it.
+The live acquisition path uses the current encoder snapshot and its classifier-head
+coordinates. This standalone cache is only for the frozen-feature proxy experiments.
 """
 import json
 import os

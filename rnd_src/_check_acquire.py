@@ -8,7 +8,7 @@ import types
 import torch
 from torch.utils.data import Dataset
 
-from rnd.acquire import acquire
+from rnd_src.acquire import acquire
 
 C, D, LEN = 8, 24, 256
 
