@@ -1,5 +1,5 @@
 python ./main.py \
---data_dir ./data/aapd \
+--data_dir ./data/aapd_54 \
 --maxlength 256 \
 --batch_size 64 \
 --unlab_batch_size 64 \
@@ -14,8 +14,6 @@ python ./main.py \
 --init_example_num 100 \
 --well_init_lower_bound 1 \
 --sample_pair_num 100 \
---dynamic_split \
---test_data_size 5000 \
 --well_init \
 --freeze_bert \
 --freeze_layer_num 9 \
@@ -23,6 +21,5 @@ python ./main.py \
 --use_recon_bce_loss \
 --use_recon_mse_loss \
 --cl_neg_mode 1 \
-
 
 

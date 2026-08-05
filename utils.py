@@ -57,10 +57,20 @@ def load_data(args, label2id):
             test_data_path = os.path.join(args.data_dir, test_file_name)
             train_data = json.load(open(train_data_path, 'r'))
             test_data = json.load(open(test_data_path, 'r'))
+    validation_file_name = 'clf_val_data_{}.json'.format(args.maxlength)
+    validation_data_path = os.path.join(args.data_dir, validation_file_name)
+    if os.path.exists(validation_data_path) and not args.dynamic_split:
+        validation_data = json.load(open(validation_data_path, 'r'))
+    else:
+        validation_data = test_data
+        print('validation data unavailable; using test data for checkpoint selection')
+
     if args.toy:
         train_data = train_data[:args.toy_size]
+        validation_data = validation_data[:args.toy_size]
         test_data = test_data[:args.toy_size]
-    print('train size', len(train_data), ',test size', len(test_data))
+    print('train size', len(train_data), ',validation size', len(validation_data),
+          ',test size', len(test_data))
 
     tokenizer = BertTokenizer.from_pretrained(args.bert_path)
     train_dataset = ClfDataset(
@@ -75,7 +85,14 @@ def load_data(args, label2id):
         tokenizer=tokenizer,
         label2id=label2id,
     )
-    return train_dataset, test_dataset, len(train_data), len(test_data)
+    validation_dataset = ClfDataset(
+        args,
+        data=validation_data,
+        tokenizer=tokenizer,
+        label2id=label2id,
+    )
+    return (train_dataset, validation_dataset, test_dataset, len(train_data),
+            len(validation_data), len(test_data))
 
 def load_label(args):
     label_freq_path = os.path.join(args.data_dir, 'label_freq.json')

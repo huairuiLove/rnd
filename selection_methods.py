@@ -9,7 +9,6 @@ import torch.optim as optim
 import torch.nn as nn
 from tqdm import tqdm
 import torch
-from apex import amp
 from utils import *
 from kcenterGreedy import *
 import pdb
@@ -355,6 +354,36 @@ def query_samples_other(args, models, method, dataset, subset, device, label_num
     annotate_label_indices = []
 
     return query_example_indices, query_label_indices, annotate_example_indices, annotate_label_indices
+
+
+def query_samples_rnd(args, models, dataset, val_dataset, subset, device,
+                     labeled_subset=None, record_path=None, log_path=None):
+    """Residual-need design acquisition (design doc sections 5-9, 12).
+
+    Kept separate from query_samples/query_samples_other so the CoMAL prototype
+    branch and the other baselines stay untouched and remain comparable.
+    """
+    from rnd.acquire import acquire
+
+    for key in models.keys():
+        models[key].eval()
+
+    def log(msg):
+        if log_path is not None:
+            print_and_write_2_file(msg, log_path)
+        else:
+            print(msg)
+
+    picks, trace = acquire(args, models, dataset, val_dataset, subset,
+                           labeled_subset, device, log=log)
+    query_example_indices = [subset[i] for i in picks]
+    if record_path is not None:
+        # build_dir rather than a bare save: the trace is written after the whole
+        # acquisition has run, so a missing directory here would discard real work.
+        torch.save({'picks': picks, 'trace': trace, 'pool': list(subset)},
+                   os.path.join(build_dir(record_path), 'rnd_trace.pt'))
+    print('both len', len(query_example_indices), 0)
+    return query_example_indices, None, torch.tensor([]), torch.tensor([])
 
 
 def init_centers(X, K, already_selected):

@@ -6,14 +6,18 @@ python ./main.py \
 --total_patience 6 \
 --save_path ./model_saved/aapd \
 --lr 1e-4 \
---gpuid '1' \
+--gpuid '0' \
 --cycles 51 \
 --try_id 1 \
 --seed 1 \
---method_type mmc \
+--method_type rnd \
 --init_example_num 100 \
 --well_init_lower_bound 1 \
 --sample_pair_num 100 \
 --well_init \
 --freeze_bert \
 --freeze_layer_num 9 \
+--rnd_ref_size 2000 \
+--rnd_wd 1e-4 \
+--rnd_kappa 0.0 \
+--rnd_work_mult 10 \

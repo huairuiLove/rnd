@@ -5,7 +5,8 @@ import torch.nn as nn
 import torch.optim as optim
 import os
 import argparse
-from transformers import BertTokenizer, BertModel, set_seed
+from torch.optim import AdamW
+from transformers import BertConfig, set_seed
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler
 import torch.optim.lr_scheduler as lr_scheduler
@@ -18,7 +19,6 @@ from controler import *
 from selection_methods import *
 from samplers import *
 import warnings
-from transformers import BertTokenizer, BertModel, set_seed, AdamW, get_linear_schedule_with_warmup, BertConfig
 import time
 
 warnings.filterwarnings('ignore')
@@ -73,6 +73,29 @@ parser.add_argument('--adaptive_b_mode', default=0, type=int)
 parser.add_argument('--without_using_exist_well_init', action='store_true')
 parser.add_argument('--proto_size', default=256, type=int)
 parser.add_argument('--save_sub_tensor', action='store_true')
+# --- RND (residual-need design) acquisition ---
+parser.add_argument('--rnd_ref_size', type=int, default=2000,
+                    help='reference set V size, taken from the validation split')
+parser.add_argument('--rnd_wd', type=float, default=1e-4,
+                    help='head L2; also fixes the Fisher damping delta=2*wd*N/d')
+parser.add_argument('--rnd_kappa', type=float, default=0.0,
+                    help='rare-label row-norm floor, eq. (15); 0 disables it')
+parser.add_argument('--rnd_delta', type=float, default=0.0,
+                    help='Fisher damping, absolute. Tuning knob, not derived: CoMAL '
+                         'trains with AdamW so there is no L2 term to match')
+parser.add_argument('--rnd_delta_rel', type=float, default=0.0,
+                    help='Fisher damping relative to the mean Fisher diagonal; '
+                         'preferred over --rnd_delta as it transfers across backbones')
+parser.add_argument('--rnd_exact_topk', type=int, default=32,
+                    help='per-step shortlist that eq.(8) is evaluated on; the eq.(9) '
+                         'certificate reports whether the argmax was provably exact')
+parser.add_argument('--rnd_normalize', action='store_true',
+                    help='ablation: L2-normalise features and refit the head in those '
+                         'coordinates, instead of using the live head as-is')
+parser.add_argument('--rnd_work_mult', type=int, default=10,
+                    help='deflation work set = rnd_work_mult * budget, top-scored')
+parser.add_argument('--rnd_linear_score', action='store_true',
+                    help='ablation: use the eq. (9) upper bound instead of eq. (14)')
 args = parser.parse_args()
 
 if __name__ == '__main__':
@@ -97,7 +120,8 @@ if __name__ == '__main__':
         args.hidden_size = model_config.hidden_size * args.feature_layer
         label_num, label2id = load_label(args)
         args.label_num = label_num
-        train_dataset, test_dataset, num_train, num_test = load_data(args, label2id)
+        (train_dataset, validation_dataset, test_dataset, num_train,
+         num_validation, num_test) = load_data(args, label2id)
         indices = list(range(num_train))
         random.shuffle(indices)
         if args.init_example_num > 0 :
@@ -118,6 +142,12 @@ if __name__ == '__main__':
             pin_memory=True,
             sampler=SubsetRandomSampler(list(set(labeled_set)))
         )
+        validation_loader = DataLoader(
+            validation_dataset,
+            batch_size=args.batch_size,
+            num_workers=NUM_WORKER,
+            pin_memory=True
+        )
         test_loader = DataLoader(
             test_dataset,
             batch_size=args.batch_size,
@@ -136,6 +166,7 @@ if __name__ == '__main__':
             random.shuffle(unlabeled_set)
             dataloaders = {
                 'labeled': labeled_loader,
+                'validation': validation_loader,
                 'test': test_loader
             }
 
@@ -174,7 +205,7 @@ if __name__ == '__main__':
                     optimizers['mmc_module'] = mmc_optim
                     schedulers['mmc_module'] = mmc_sched
                 controler = Controler(args, device, cycle, trial_dir_path, cnt_id=cnt_id)
-                if method in ['core_set', 'badge', 'lloss', 'adaptive', 'mmc', 'cvirs', 'random']:
+                if method in ['core_set', 'badge', 'lloss', 'adaptive', 'mmc', 'cvirs', 'random', 'rnd']:
                     controler.train_total(models, method, optimizers, schedulers, dataloaders, cycle, label_num)
                 else:
                     controler.train_total_sep2(models, method, optimizers, schedulers, dataloaders, cycle, label_num)
@@ -193,7 +224,14 @@ if __name__ == '__main__':
             random.shuffle(query_set)
             subset = query_set[:]
 
-            if method in ['core_set', 'badge', 'lloss', 'adaptive', 'mmc', 'cvirs', 'random']:
+            if method == 'rnd':
+                query_example_indices, query_label_indices, annotate_example_indices, annotate_label_indices = query_samples_rnd(
+                    args, models, train_dataset, validation_dataset, subset, device,
+                    labeled_subset=labeled_set,
+                    record_path=os.path.join(trial_dir_path, 'cycle_{}_cnt_0'.format(cycle)),
+                    log_path=sampler_log_path
+                )
+            elif method in ['core_set', 'badge', 'lloss', 'adaptive', 'mmc', 'cvirs', 'random']:
                 query_example_indices, query_label_indices, annotate_example_indices, annotate_label_indices = query_samples_other(
                     args, models, method, train_dataset, subset, device, label_num,
                     label_cardinality = train_dataset.get_label_Cardinality(),
