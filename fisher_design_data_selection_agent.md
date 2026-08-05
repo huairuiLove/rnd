@@ -27,11 +27,11 @@ IPB-MAB 的结构性缺陷不在于任一模块，而在于**相似度核不完�
 两者互不包含，所以只能靠 `rank()` 归一化与 $\lambda_t$ 硬缝，批内冗余无法在分数层面表达，于是再外挂
 Cluster-MAB 补多样性。本文档的解法不是二选一，而是构造一个**两个轴都细**的核，并证明：
 
-1. 用于未标注候选的**线性** influence 打分目标量是错的（命题 1）；
+1. 在只用模型自身分布、不引入伪标签的约束下，signed 线性 influence 的期望恒为零而退化（命题 1；这是 score-function identity，**不构成"线性 influence 是错误目标"的论断**）；
 2. 正确的打分是一个**二次型**，它同时是 c-最优设计的边际增益线性化（命题 2）与标签边缘化后的
    influence 二阶矩（命题 3），两条路线恒等；
 3. 批内去冗余由目标函数自带的 deflation 给出（式 9），不需要 MAB；
-4. prototype 是该核的**低秩截断**，$M_c$ 的真实身份是截断秩（第 8 节）；
+4. prototype 在标签轴细、实例轴粗，故式 (13) 的表达力不低于它；"$M_c$ 就是截断秩"是解释性猜想而非恒等（第 8 节已按证明强度分级）；
 5. 完整核可**精确因式分解**，复杂度由 $O(Cd)$ 降到 $O(C+d)$（命题 4）。
 
 净结果：删除 $S_{\mathrm{boundary}}$、$S_{\mathrm{prototype}}$、PFD、SLCI、多原型库、$\tau_{t,c}$、
@@ -296,7 +296,7 @@ $w_c$ 的**部分**作用由 $\lVert R_{b,c}\rVert$ 承担。
 问题。第 9.2 节保留的行范数下界正是为此：**如果该涌现是完备的，那条下界就不该有效果**；实测在
 $\kappa=1$ 时抬升了 9/54 行，说明涌现并不完备。这条 floor 因此是对猜想 7.2 不成立部分的补偿。
 
-## 8. 命题 4：核的精确因式分解与 prototype 的归约
+## 8. 命题 4：核的精确因式分解，及与已有准则的关系分级
 
 **命题 4.** 取 $u(x)=\sum_c\sqrt{w_c}\,s_c(x)\,\psi_c(x)$，则
 
@@ -407,6 +407,39 @@ $$
 式 (15) 是全案**唯一**的手工先验，也是"标签最低覆盖约束"唯一该存在的位置，必须单独消融
 （$\kappa=0$ vs 调优 $\kappa$）。$V$ 较小时同时使用多个 reference folds 交叉拟合 $g_V$。
 
+**两点实现约束（实测所迫）。**
+
+1. **$\kappa$ 必须相对化。** $\lVert R_c\rVert$ 与 $\lVert g_V\rVert/\delta$ 同阶，跨数据集与跨轮次
+   相差若干数量级，绝对阈值要么对所有标签生效、要么对任何标签都不生效。实现取
+   $\text{target}_c=\kappa\,w_c\cdot\operatorname{median}_{c'}\lVert R_{c'}\rVert$，
+   $\kappa=1$ 意为"把最稀有标签抬到中位数"。实测 $\kappa\in\{0,0.25,0.5,1,2\}$
+   分别抬升 $0/0/3/9/23$ 行（共 54）。
+2. **$\pi_{t,c}$ 必须取自 $V$ 而非 $L$。** $\lvert L\rvert\sim100$、$C=54$ 时多数标签在 $L$ 中零正例，
+   $w_c$ 退化为常数，floor 静默失效。$V$ 属设计侧信息，允许使用；须加 Laplace 平滑。
+
+**关键：flooring 改变了目标函数本身（初稿未写明，本版补正）。**
+
+实现在 flooring 后令 $\mathrm{GV_{eff}}=A\,R^{\text{floored}}$，使 $R=A^{-1}\mathrm{GV_{eff}}$ 在整个
+deflation 过程中保持成立，**代数一致性因此是精确的**（实测预测 $\Delta_b$ 与 $\Phi$ 实际降幅相对误差
+$\sim10^{-13}$）。但代数一致 $\ne$ 目标未变：
+
+$$
+\kappa>0\;\Longrightarrow\;\mathrm{GV_{eff}}\ne g_V,
+\qquad
+\Phi_b=\mathrm{GV_{eff}}^\top A_b^{-1}\mathrm{GV_{eff}}\ne g_V^\top A_b^{-1}g_V .
+$$
+
+即 $\kappa>0$ 时贪心优化的是**以 $\mathrm{GV_{eff}}$ 为方向的设计目标**，而非式 (7) 以 $g_V$ 为方向的
+原始 c-最优目标。因此：
+
+- 该配置应称为**稀有标签稳健化目标（rare-label robustified objective）**，
+  **不得**称为"原 c-最优目标的精确实现"；
+- 一切最优性陈述（$\Phi$ 单调非增、$\Delta_b$ 精确、贪心性质）均**相对 $\mathrm{GV_{eff}}$** 成立，
+  相对 $g_V$ 不成立；
+- $\kappa=0$ 是唯一与式 (7) 严格等同的配置，消融必须含它作为"纯 c-最优"基准；
+- 日志打印 $\lVert\mathrm{GV_{eff}}-g_V\rVert/\lVert g_V\rVert$ 与是否发生 flooring，
+  使读者可判断目标偏离幅度（`rnd/acquire.py` 的 `objective:` 行）。
+
 ### 9.3 停止规则
 
 $\Phi_b$ 单调非增且有下界，故可定义相对停止条件
@@ -415,21 +448,48 @@ $\big(\Phi_{b}-\Phi_{b+1}\big)/\Phi_0<\varepsilon$，即"本轮剩余候选已�
 
 ### 9.4 复杂度汇总
 
-| 阶段 | 代价 | 备注 |
-|---|---|---|
-| 特征 $z(x)$ | 一次前向，全程缓存 | `rnd/features.py`，冻结 backbone 下只需一次 |
-| $A_c$ 与 Cholesky | $O(C(Nd^2+d^3))$ | $C$ 个独立 $d\times d$ 块，式 (14) |
-| $R=A^{-1}g_V$ | $O(Cd^2)$ | Cholesky 求解，无需 HVP |
-| 全池 $v^{(b)}$ | $O(\lvert U_t\rvert Cd)$ | 一次矩阵乘 $Z R^\top$ |
-| 全池精算式 (14') | $O(\lvert U_t\rvert Cd^2)$ | $m_c$ 需逐标签 Cholesky 求解 |
-| deflation | $O(Cd^3)$ 每步 | 秩一更新后重分解，见下 |
+**初版的复杂度不可接受，本版重做（实测 564s $\to$ 11.8s，约 48 倍）。**
 
-无粗筛/精算两段式：式 (14') 直接对全池精算。
+初版有三处叠加的问题，在 CoMAL 真实规模（$C=54$、$d+1=769$、$B=100$、$\lvert U\rvert=2\times10^4$）
+下合计 $\sim2.5\times10^{12}$ 次立方级运算：
 
-deflation 每步重做 $C$ 个 Cholesky，是主要开销；$B$ 步共 $O(BCd^3)$。两点实现约定：
-（i）候选池先按式 (14') 取 top-$M$（$M\sim10B$）子集，deflation 只在该子集内循环，
-使代价与 $\lvert U_t\rvert$ 解耦；（ii）$M$ 的截断必须记入日志——被丢弃的候选数若不打印，
-覆盖率看起来会像是全池的。
+1. 全池精算式 (14')：$O(\lvert U\rvert Cd^2)$，且需 $(C,\lvert U\rvert,d)$ 的中间张量（float64 下 332 MB）；
+2. 每步 deflation 后重做 $C$ 个 $769\times769$ Cholesky：$O(BCd^3)$；
+3. 每步在工作集上重算 $m_c$：$O(BMCd^2)$。
+
+三者分别对应三个可用的恒等式：
+
+| 阶段 | 初版 | 本版 | 依据 |
+|---|---|---|---|
+| 特征 $z(x)$ | 一次前向 | 同 | 冻结 backbone，全程缓存 |
+| $A_c$ 与求逆 | $O(C(Nd^2+d^3))$ | 同（仅一次） | 式 (14)，$C$ 个独立块 |
+| 全池筛选 | 精算 $O(\lvert U\rvert Cd^2)$ | **上界** $O(\lvert U\rvert Cd)$ | $m_c\ge\lVert z\rVert^2/\operatorname{tr}A_c$ |
+| $A_c^{-1}$ 维护 | 重分解 $O(Cd^3)$/步 | **Sherman--Morrison** $O(Cd^2)$/步 | $A_c$ 增量为秩一 |
+| $m_c$ 维护 | 重算 $O(MCd^2)$/步 | **秩一更新** $O(MCd)$/步 | 同一 SM 量：$m_c\!-\!=\!\text{coef}_c\langle w_c,z\rangle^2$ |
+
+**筛选上界（本版新增）.** 式 (9) 完全丢弃 $m_c$，在 $A_c$ 已吸收数据后极松。任何 $m_c$ 的**下界**都能
+收紧它，而有一个是免费的：$A_c\preceq\lambda_{\max}I$ 且 $\lambda_{\max}\le\operatorname{tr}A_c$，故
+
+$$
+m_c(x)=z^\top A_c^{-1}z\;\ge\;\frac{\lVert z\rVert^2}{\operatorname{tr}A_c},
+\qquad
+\Delta^{\mathrm{ub}}(x)=\sum_c\frac{v_c^2}{1/s_c^2+\lVert z\rVert^2/\operatorname{tr}A_c}
+\;\ge\;\Delta(x).
+\tag{16}
+$$
+
+式 (16) 仍是上界，故 top-$M$ 截断**可采纳**（被丢弃者的精算值也必低于截断线），
+且比式 (9) 紧得多。数值验证 $\Delta^{\mathrm{lin}}\ge\Delta^{\mathrm{ub}}\ge\Delta$ 逐点成立
+（`rnd/_check_cost.py`）。
+
+**关于"精确"的准确表述.** 贪心每步对**整个工作集 $S$** 精确计算式 (14')（缓存 $m$ 使其为 $O(MCd)$），
+因此 argmax 在 $S$ 内是精确的、无 shortlist、不丢弃任何候选。唯一的近似是构造 $S$ 的那次上界筛选；
+日志打印**筛选证书**（被丢弃者的最大上界 vs 保留者的最大精算值），据此判断首个选择是否可证明为
+全池 argmax。$M$ 的截断量必须打印——否则覆盖率看起来会像是全池的。
+
+**秩一累积误差是实测量，不是假设.** SM 更新与缓存 $m$ 都会累积浮点误差。批末重算若干候选的 $m$
+与缓存值比对，实测 $B=100$ 后漂移 $4.2\times10^{-14}$；预测/实际 $\Delta$ 相对误差 $6.4\times10^{-13}$；
+SM 与从头重分解的差 $4.7\times10^{-16}$（`rnd/_check_deflate.py`）。三者都进日志。
 
 ## 10. 智能体层：把解析式降级为先验
 
@@ -462,9 +522,28 @@ $$
    在 reference fold 上得 $R^{(i)}=\Delta\text{macro-AUPRC}$；
 3. 组内优势 $\hat A^{(i)}=(R^{(i)}-\operatorname{mean})/\operatorname{std}$，均摊给该轨迹的 $B$ 个决策；
 4. 正则：对行为克隆先验策略的 KL（防坍缩）+ 熵奖励（保批内多样性）；
-5. **dense shaping**：每步内在奖励取式 (8) 的 $\Delta_b(x)$。这是 potential-based shaping
-   （$\sum_b\Delta_b=\Phi_0-\Phi_B$ 为势差），不改变最优策略，只解决稀疏奖励下的信用分配。
-   解析式在此以 shaping 身份被复用，而非被抛弃。
+5. **dense shaping（本版更正：初稿的 potential-based 论证是错的）**。每步内在奖励取式 (8) 的
+   $\Delta_b(x)$，$\sum_b\Delta_b=\Phi_0-\Phi_B(Q)$。初稿据此称"这是 potential-based shaping，
+   不改变最优策略"——**该论证不成立**：
+
+   Ng-Harada-Russell 的不变性要求 shaping 取 $F(s,s')=\gamma\Phi(s')-\Phi(s)$ 且**在终止状态强制
+   $\Phi(s_{\mathrm{term}})=0$**。这里 $\Phi_B(Q)$ 依赖最终选中的批次 $Q$，是策略可以影响的量，
+   并非常数；因此总 shaping 量 $\Phi_0-\Phi_B(Q)$ 随策略变化，直接叠加到 macro-AUPRC 奖励上会
+   **改变最优策略**——策略可以通过压低 $\Phi_B$ 换取 shaping 收益而牺牲真实 AUPRC。
+
+   两种正确做法，任选其一：
+
+   **(a) 严格 potential-based。** 令 $\Phi(s_b)=-\Phi_b$（负号使 $\Phi$ 随进展递增），
+   $F(s_b,s_{b+1})=\Phi(s_{b+1})-\Phi(s_b)=\Phi_b-\Phi_{b+1}=\Delta_b$，并在终止转移上取
+   $F(s_B,s_{\mathrm{term}})=0-\Phi(s_B)=\Phi_B$。即**最后一步必须额外补上 $+\Phi_B$**，
+   使整条轨迹的 shaping 总和恒为 $\Phi_0$（与策略无关的常数），不变性才成立。初稿遗漏的正是这一项。
+
+   **(b) 不声称不变性，只当作偏置。** 保留 $\Delta_b$ 作为 dense 信号，但明确它是一个
+   **有偏 shaping**，并以系数 $\eta$ 退火至 0（或只在行为克隆/预热阶段使用）。此时不得宣称
+   "不改变最优策略"，只能宣称"加速早期信用分配，末期偏置消失"。
+
+   **本文档采用 (a)**，因为它零成本且可验证：$\sum_b\Delta_b+\Phi_B\equiv\Phi_0$ 是一个可在实现中
+   assert 的恒等式。若实现选择 (b)，必须在日志中打印 $\eta$ 的退火曲线。
 
 **冷启动与下界.** 先行为克隆模仿式 (9)/(8) 的解析 argmax，再上 RL。最坏情况策略退化为解析规则，
 方法有明确下界。
@@ -495,27 +574,49 @@ $\Phi_0-\Phi(Q)$ 打分（**无需重训模型**）取最优批次提交专家�
 输入：已标注集 L, 未标注池 U, 参考集 V, 预算 B, deflation 子集大小 M, 稀有下界 kappa
 输出：查询批次 Q
 
-1.  在 L 上拟合线性头 W（冻结 backbone，凸问题，LBFGS）。
-2.  z(x) = [h(x), 1]，全池一次前向后缓存（第 2 节的 bias 增广）。
-3.  delta <- fisher_damping(Z_L, wd) = 2*wd*|L|/d      # 与拟合头的 L2 项一致，非手调
-4.  A_c <- delta*I + sum_{x in L} s_c(x)^2 z z^T ，逐标签 Cholesky   # 式 (14)
-    R_c <- A_c^{-1} (g_V)_c                                          # 式 (4)
-5.  施加式 (15) 稀有标签行下界；随后记录 GV_eff = A R，使 deflation 保持精确。
-6.  全池打分式 (14')，取 top-M 作为 deflation 工作集 S（打印被截断的候选数）。
-7.  Q = 空；b = 0。
+1.  读取实时模型的 CLS 特征与 logits。**必须同坐标系**：特征即头部实际消费的原始 CLS，
+    不得再归一化（否则 (p-y)z 不是产生该 logits 的梯度）。日志打印 max|Z W^T - logits|。
+2.  z(x) = [h(x), 1]（第 2 节的 bias 增广），全池一次前向后缓存。
+3.  delta <- 阻尼超参。**这是调节量，不是推导量**：CoMAL 用 AdamW，没有可对齐的 L2 项，
+    2*wd*|L|/d 只是继承自代理头的约定。建议用 --rnd_delta_rel 相对 Fisher 尺度指定，
+    并打印 delta 与 fisher_scale 之比。它的实际作用是设定零空间尺度（|L| << d 时 A_c 秩亏）。
+4.  A_c <- delta*I + sum_{x in L} s_c(x)^2 z z^T                      # 式 (14)
+    一次 Cholesky 求逆得 A_c^{-1}；R_c <- A_c^{-1} (g_V)_c            # 式 (4)
+5.  施加式 (15) 稀有标签行下界；随后记录 GV_eff = A R。
+    **kappa>0 时目标已改变**（见 9.2）：此后 Phi 是对 GV_eff 而非 g_V 的设计目标，
+    日志打印 ||GV_eff - g_V|| / ||g_V||。
+6.  全池用**上界**打分（O(|U| C d)，绝不用式 (14') 精算——那是 O(|U| C d^2) 且要
+    (C,|U|,d) 的中间量），取 top-M 为工作集 S。上界逐点支配式 (14')，故截断是
+    **可采纳的**而非仅是省事；打印被丢弃的候选数与筛选证书。
+7.  在 S 上一次性计算 m_c(x) = z^T A_c^{-1} z 并缓存。
 8.  重复 B 次：
-    8.1 在 S 上按式 (14') 计算 Delta_b；
+    8.1 Delta_b(x) = sum_c v_c^2 / (1/s_c^2 + m_c)，对**整个 S** 精确计算（O(M C d)）；
     8.2 若启用智能体：按 pi_psi(.|s_b) 采样/argmax（第 10 节）；否则取 argmax Delta_b(x)；
     8.3 x_b <- 选中样本；Q <- Q + {x_b}；S <- S - {x_b}；
-    8.4 秩一 deflation：A_c <- A_c + s_c(x_b)^2 z z^T，重分解，R <- A^{-1} GV_eff；  # 式 (11)
-    8.5 记录 Phi_b = <GV_eff, R>，用于验证单调非增与预测/实际 Delta 一致性；
+    8.4 秩一 deflation，**Sherman-Morrison 更新 A_c^{-1}，不重分解**：            # 式 (11)
+        w_c <- A_c^{-1} z；A_c^{-1} <- A_c^{-1} - [s_c^2/(1+s_c^2 z^T w_c)] w_c w_c^T；
+        R <- A^{-1} GV_eff；并以同一秩一量更新缓存 m：m_c(x) -= coef_c <w_c, z(x)>^2。
+    8.5 记录 Phi_b = <GV_eff, R>，验证单调非增与预测/实际 Delta 一致性；
     8.6 若式 (9.3) 停止条件满足则提前结束（仅变预算实验启用）。
-9.  若启用推理时搜索：重复 7--8 得 G 条 rollout，取闭式 Phi_0 - Phi(Q) 最大者。
+9.  批末重算若干候选的 m 与缓存值比对，打印漂移上界（秩一累积误差的实测量）。
 10. 返回 Q 提交标注；CoMAL 侧调用 dataset.update_data(Q) 并重建 labeled_loader。
 
-第 4 步的 delta 与第 5 步的 GV_eff 是两处易错点：delta 若与拟合头的 L2 尺度不一致，
-Fisher 几何与实际后验不匹配；GV_eff 若在 flooring 之后不重算，deflation 不再精确
-（R != A^{-1} GV_eff），Phi 轨迹会失去单调性——这正是可在日志中自检的量。
+**三处易错点，全部有对应日志行。**
+
+1. **坐标系（第 1 步）.** 读 logits 后再缩放特征，会让 (p-y)z 变成另一个头的梯度。此错误不报异常、
+   不影响单调性，只是让整套 Fisher 几何描述一个从未训练过的头。自检量：max|Z W^T - logits|。
+   本项目实测曾犯此错（归一化 CLS 而 logits 取自原始 CLS），故列为第一位。
+2. **GV_eff（第 5 步）.** flooring 后若不重算 GV_eff，deflation 不再精确（R != A^{-1} GV_eff），
+   Phi 轨迹失去单调性。自检量：预测 Delta 与实际 Phi 降幅的相对误差（应 ~1e-13）。
+3. **复杂度（第 6--8 步）.** 三个独立的坑：(i) 全池精算式 (14')；(ii) 每步重做 Cholesky；
+   (iii) 每步重算 m。本项目初版三者皆犯，实测 C=54, d=769, B=100, |U|=2e4 下耗时 564s；
+   改为上界筛选 + Sherman-Morrison + 缓存 m 后为 11.8s（约 48 倍），
+   预测/实际误差 6.4e-13、m 漂移 4.2e-14、Phi 仍严格单调。见 `rnd/_check_cost.py`。
+
+**关于 delta 的定位（本版更正）.** 初稿在第 3 步标注"与拟合头的 L2 项一致，非手调"，
+**该表述已撤回**。它仅在用 `rnd/head.py` 的 L2 目标拟合代理头时成立；接入 CoMAL 实时模型后，
+优化器是 AdamW，没有可对齐的 L2 项，因此 delta 是一个**普通超参**，须进入消融、
+不得宣称"由拟合目标严格导出"。
 ```
 
 ## 13. 待验证假设
