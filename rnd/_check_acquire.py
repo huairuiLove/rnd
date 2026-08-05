@@ -47,7 +47,8 @@ def main():
     models = {'backbone': FakeModel()}
     args = types.SimpleNamespace(batch_size=16, sample_pair_num=5, rnd_ref_size=50,
                                  rnd_wd=1e-4, rnd_kappa=0.0, rnd_work_mult=4,
-                                 rnd_delta=0.0, rnd_linear_score=False)
+                                 rnd_delta=0.0, rnd_delta_rel=0.0,
+                                 rnd_normalize=False, rnd_linear_score=False)
     pool, labeled = list(range(30, 120)), list(range(30))
     picks, trace = acquire(args, models, ds, vds, pool, labeled, 'cpu', log=print)
     assert len(picks) == 5, picks
@@ -69,6 +70,16 @@ def main():
     args.rnd_linear_score = True
     print('\n--- eq. (9) linear-score ablation ---')
     acquire(args, models, ds, vds, pool, labeled, 'cpu', log=print)
+
+    # The normalise branch refits the head, so it exercises a different code path than
+    # the default. It must still produce a valid selection, and the coords log line must
+    # say which coordinate system was used -- that line is the guard against silently
+    # reintroducing the mismatch this branch exists to avoid.
+    args.rnd_linear_score = False
+    args.rnd_normalize = True
+    print('\n--- L2-normalised + head refit (ablation) ---')
+    picks_n, _ = acquire(args, models, ds, vds, pool, labeled, 'cpu', log=print)
+    assert len(set(picks_n)) == 5, picks_n
     print('\nall dry-run checks passed')
 
 

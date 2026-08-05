@@ -111,16 +111,43 @@ class ResidualNeed:
         return Z @ self.R.T
 
     def m(self, Z):
-        """m_c(x) = z^T A_c^{-1} z. Returns (N, C).
+        """m_c(x) = z^T A_c^{-1} z. Returns (N, C). O(N C D^2).
 
-        O(N C D^2) and allocates (C, N, D): call on a shortlist, never the full pool.
+        Looped over labels rather than one einsum: the batched form would allocate a
+        (C, N, D) intermediate, which at C=54, N=1000, D=769 is 332 MB of float64.
+        Call this once and maintain it with `update_m`; recomputing it per greedy step
+        is what made the previous implementation cost minutes per cycle.
         """
-        T = torch.einsum('cde,ne->cnd', self.Ainv, Z)
-        return (T * Z.unsqueeze(0)).sum(-1).T.contiguous()
+        out = torch.empty(Z.shape[0], self.C, dtype=Z.dtype, device=Z.device)
+        for c in range(self.C):
+            out[:, c] = ((Z @ self.Ainv[c]) * Z).sum(-1)
+        return out
+
+    @staticmethod
+    def update_m(M, Z, w, coef):
+        """Rank-one update of a cached m, matching the Sherman-Morrison step.
+
+        A_c^{-1} <- A_c^{-1} - coef_c w_c w_c^T, so
+        m_c(x) <- m_c(x) - coef_c <w_c, z(x)>^2. O(N C D) instead of O(N C D^2).
+        """
+        return M - coef.unsqueeze(0) * (Z @ w.T) ** 2
 
     def score_lin(self, Z, P):
         """Eq. (9). O(N C D) upper bound, used to screen the pool."""
         return (sigma2(P) * self.v(Z) ** 2).sum(-1)
+
+    def score_ub(self, Z, P):
+        """Tighter O(N C D) upper bound on eq. (14') than eq. (9).
+
+        Eq. (9) drops m_c entirely, which is very loose once A_c has absorbed data. Any
+        lower bound on m_c tightens it, and one is free: A_c <= lambda_max I with
+        lambda_max <= trace(A_c), so m_c = z^T A_c^{-1} z >= ||z||^2 / trace(A_c).
+        Still an upper bound on the exact score, so it remains admissible as a screen,
+        but tight enough that the argmax certificate in `select` can actually fire.
+        """
+        V = self.v(Z)
+        m_lo = (Z ** 2).sum(-1, keepdim=True) / self.A.diagonal(dim1=-2, dim2=-1).sum(-1)
+        return (V ** 2 / (1.0 / sigma2(P) + m_lo)).sum(-1)
 
     def score_exact(self, Z, P):
         """Eq. (14'). Exact marginal gain, O(N C D^2) -- shortlists only."""
@@ -157,6 +184,7 @@ class ResidualNeed:
         self.Ainv = self.Ainv - coef.view(-1, 1, 1) * torch.einsum('ci,cj->cij', w, w)
         self.A = self.A + s2.view(-1, 1, 1) * torch.outer(z, z)
         self.R = torch.einsum('cij,cj->ci', self.Ainv, self.GV_eff)
+        return w, coef
 
     def phi(self):
         """Phi = GV_eff^T A^-1 GV_eff, summed over label blocks."""
@@ -166,55 +194,62 @@ class ResidualNeed:
         return self.R.norm(dim=-1)
 
 
-def select(rn, Z, P, budget, exact=True, log=None, topk=32):
+def select(rn, Z, P, budget, exact=True, log=None, check_drift=16):
     """Greedy eq. (14') argmax with eq. (11) deflation between picks.
 
-    Each step screens the work set with eq. (9) in O(M C D), exact-scores only the top
-    `topk`, then checks the certificate: if the best *discarded* upper bound is at or
-    below the best exact value, the pick is provably the exact argmax over the work
-    set. Steps where the certificate fails are counted, not hidden -- that count is the
-    honest statement of how approximate the greedy path was.
+    The saturation term m is computed once over the whole work set, then carried
+    forward by the same rank-one update that maintains A^{-1}. Every greedy step
+    therefore scores the *entire* work set exactly, in O(M C D), with no shortlist and
+    nothing discarded -- the argmax is the exact argmax over the work set by
+    construction, so there is no per-step certificate to fail. The one remaining
+    approximation is the eq. (9) screen that built the work set, which `acquire`
+    certifies separately at pool level.
 
-    Returns (picks, trace). trace[b] holds the predicted gain for the chosen sample and
-    the realised drop in Phi. Those must agree to solver precision; the gap is the
-    cheapest check that R stays equal to A^{-1} GV_eff through Sherman-Morrison, so it
-    is logged rather than asserted.
+    Cached m drifts as rank-one updates accumulate. At the end, m is recomputed from
+    scratch for `check_drift` random candidates and the largest relative disagreement
+    is reported, so drift is measured rather than assumed away.
+
+    Returns (picks, trace). trace[b] holds the predicted gain and the realised drop in
+    Phi; those must agree to solver precision.
     """
     picks, trace = [], []
     n = Z.shape[0]
     alive = torch.ones(n, dtype=torch.bool, device=Z.device)
+    S2 = sigma2(P)
+    inv_s2 = 1.0 / S2
+    M = rn.m(Z) if exact else None
     for b in range(budget):
-        ub = rn.score_lin(Z, P)
-        ub[~alive] = -float('inf')
-        if exact:
-            k = min(topk, int(alive.sum()))
-            cand = ub.topk(k).indices
-            ex = rn.score_exact(Z[cand], P[cand])
-            j = int(ex.argmax())
-            i = int(cand[j])
-            predicted = float(ex[j])
-            rest = ub.clone()
-            rest[cand] = -float('inf')
-            best_dropped = float(rest.max())
-            certified = bool(best_dropped <= predicted)
-        else:
-            i = int(ub.argmax())
-            predicted = float(ub[i])
-            best_dropped, certified = float('nan'), None
+        V = rn.v(Z)
+        s = (V ** 2 / (inv_s2 + M)).sum(-1) if exact else (S2 * V ** 2).sum(-1)
+        s = torch.where(alive, s, torch.full_like(s, -float('inf')))
+        i = int(s.argmax())
+        predicted = float(s[i])
         phi_before = float(rn.phi())
-        rn.deflate(Z[i], P[i])
+        w, coef = rn.deflate(Z[i], P[i])
+        if exact:
+            M = rn.update_m(M, Z, w, coef)
         phi_after = float(rn.phi())
         alive[i] = False
         picks.append(i)
         rec = {'step': b, 'idx': i, 'predicted': predicted,
                'phi_before': phi_before, 'phi_after': phi_after,
-               'phi_drop': phi_before - phi_after, 'certified': certified,
-               'best_dropped_ub': best_dropped,
+               'phi_drop': phi_before - phi_after,
                'rel_err': abs((phi_before - phi_after) - predicted) / max(predicted, 1e-300)}
         trace.append(rec)
         if log is not None and (b < 3 or b == budget - 1):
-            log('  [rnd] step %d idx=%d pred=%.6e phi_drop=%.6e rel_err=%.2e certified=%s'
-                % (b, i, predicted, rec['phi_drop'], rec['rel_err'], certified))
+            log('  [rnd] step %d idx=%d pred=%.6e phi_drop=%.6e rel_err=%.2e'
+                % (b, i, predicted, rec['phi_drop'], rec['rel_err']))
+    m_drift = None
+    if exact and check_drift:
+        k = min(check_drift, n)
+        sub = torch.randperm(n, device=Z.device)[:k]
+        fresh = rn.m(Z[sub])
+        m_drift = float(((M[sub] - fresh).abs() / fresh.abs().clamp_min(1e-300)).max())
+        if log is not None:
+            log('  [rnd] cached-m drift over %d steps (%d probes): max rel err = %.2e'
+                % (budget, k, m_drift))
+    for t in trace:
+        t['m_drift'] = m_drift
     return picks, trace
 
 

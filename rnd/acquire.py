@@ -103,14 +103,14 @@ def _log_selection(trace, scores, picks, n_pool, n_work, budget, exact, log):
         if rel > 1e-6:
             log('[rnd] WARNING deflation not exact -- R != A^{-1} GV_eff. Sherman-Morrison '
                 'accumulates error over the batch; raise --rnd_delta or shrink the budget')
-        # The eq.(9) screen inside select() is only admissible when the certificate
-        # holds. Steps where it failed are steps whose argmax is not provably exact.
-        n_cert = sum(1 for t in trace if t['certified'])
-        log('[rnd] exact-argmax certificate: %d/%d steps provably exact over the work set'
-            % (n_cert, len(trace)))
-        if n_cert < len(trace):
-            log('[rnd] NOTE %d step(s) uncertified -- raise --rnd_exact_topk for a '
-                'stronger guarantee' % (len(trace) - n_cert))
+        drift = trace[0].get('m_drift')
+        if drift is not None:
+            # Cached m is carried by rank-one updates instead of being recomputed each
+            # step; this is the measurement of how far that drifted over the batch.
+            log('[rnd] cached-m drift: max rel err = %.3e' % drift)
+            if drift > 1e-6:
+                log('[rnd] WARNING cached m has drifted -- exact scores are stale; '
+                    'shrink the budget or raise damping')
     else:
         # Eq. (9) is an upper bound on the realised drop, so predicted > phi_drop is
         # expected here; the gap size is the saturation effect of corollary 2.1.
@@ -191,17 +191,24 @@ def acquire(args, models, dataset, val_dataset, pool, labeled, device, log=print
 
     budget = min(args.sample_pair_num, Zu.shape[0])
     exact = not args.rnd_linear_score
-    # Screen with eq. (9), never with eq. (8): the exact score costs O(|U| C d^2) and
-    # allocates (C,|U|,d), so running it on the full pool is what made the earlier
-    # version unaffordable. Eq. (9) is O(|U| C d), one matmul, and dominates eq. (8)
-    # entrywise -- so a top-M cut on eq. (9) can only discard candidates whose exact
-    # score was also below the cut. The truncation is therefore admissible, not just
-    # cheap, and `select` re-verifies the argmax against it at every step.
-    scores = rn.score_lin(Zu, Pu)
+    # Never exact-score the pool: eq.(8) is O(|U| C d^2) and allocates (C,|U|,d), which
+    # is what made the previous version unaffordable. score_ub is O(|U| C d) and upper
+    # bounds eq.(8) entrywise, so a top-M cut on it can only drop candidates whose exact
+    # score was also below the cut -- the truncation is admissible, not merely cheap.
+    scores = rn.score_ub(Zu, Pu)
     work = min(max(args.rnd_work_mult * budget, budget), Zu.shape[0])
     top = scores.topk(work).indices
-    picks_local, trace = select(rn, Zu[top], Pu[top], budget, exact=exact, log=log,
-                                topk=args.rnd_exact_topk)
+    if exact and work < Zu.shape[0]:
+        # Certificate for the screen: compare the best discarded upper bound against
+        # the best kept exact value. If it does not hold, the first pick may not be the
+        # pool argmax and the work set is too small -- reported either way.
+        rest = scores.clone()
+        rest[top] = -float('inf')
+        best_cut, best_kept = float(rest.max()), float(rn.score_exact(Zu[top], Pu[top]).max())
+        log('[rnd] screen certificate: best cut ub=%.4e vs best kept exact=%.4e -> '
+            'first pick provably pool-exact: %s'
+            % (best_cut, best_kept, best_cut <= best_kept))
+    picks_local, trace = select(rn, Zu[top], Pu[top], budget, exact=exact, log=log)
     picks = [int(top[i]) for i in picks_local]
     _log_selection(trace, scores, picks, Zu.shape[0], work, budget, exact, log)
     return picks, trace

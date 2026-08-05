@@ -20,4 +20,8 @@ python ./main.py \
 --rnd_ref_size 2000 \
 --rnd_wd 1e-4 \
 --rnd_kappa 0.0 \
---rnd_work_mult 10 \
+--rnd_work_mult 10
+
+# ablation knobs (see doc section 14):
+# --rnd_delta_rel 1e-3   # damping relative to the Fisher scale (tuning knob, not derived)
+# --rnd_normalize        # L2-normalise features and refit the head (coordinate-system ablation)

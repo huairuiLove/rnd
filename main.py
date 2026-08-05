@@ -86,9 +86,6 @@ parser.add_argument('--rnd_delta', type=float, default=0.0,
 parser.add_argument('--rnd_delta_rel', type=float, default=0.0,
                     help='Fisher damping relative to the mean Fisher diagonal; '
                          'preferred over --rnd_delta as it transfers across backbones')
-parser.add_argument('--rnd_exact_topk', type=int, default=32,
-                    help='per-step shortlist that eq.(8) is evaluated on; the eq.(9) '
-                         'certificate reports whether the argmax was provably exact')
 parser.add_argument('--rnd_normalize', action='store_true',
                     help='ablation: L2-normalise features and refit the head in those '
                          'coordinates, instead of using the live head as-is')
